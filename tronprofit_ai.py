@@ -99,7 +99,7 @@ def send_order(symbol, side, quantity):
 def log_trade(trade_type, price):
     timestamp = datetime.utcnow().isoformat()
     entry = f"{timestamp},{trade_type},{price}\n"
-    with open(TRADE_LOG_FILE, ' 'a') as f:
+    with open(TRADE_LOG_FILE,'a') as f:
         f.write(entry)
 
 def read_last_trade():
