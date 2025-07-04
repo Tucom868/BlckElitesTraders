@@ -1,0 +1,11 @@
+services:
+  - type: worker
+    name: tronprofit-ai-bot
+    env: python
+    buildCommand: pip install -r requirements.txt
+    startCommand: python tronprofit_ai.py
+    envVars:
+      - key: BINANCE_API_KEY
+        sync: false
+      - key: BINANCE_API_SECRET
+        sync: false
