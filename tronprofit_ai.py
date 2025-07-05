@@ -19,10 +19,10 @@ BASE_URL = 'https://testnet.binance.vision'
 SYMBOL = 'BTCUSDT'
 TRADE_QUANTITY = 0.001
 TRADE_LOG_FILE = 'trade_log.csv'
-PERFORMANCE_FEE_PERCENTAGE = 0.20  # 20%
+PERFORMANCE_FEE_PERCENTAGE = 0.20
 
 # ====== AI DECISION ENGINE ======
-def get_klines(symbol='BTCUSDT', interval='1h', limit=100):
+def get_klines(symbol='BTCUSDT', interval='1m', limit=100):
     url = f'{BASE_URL}/api/v3/klines'
     params = {'symbol': symbol, 'interval': interval, 'limit': limit}
     response = requests.get(url, params=params)
@@ -67,6 +67,8 @@ def ai_decision_engine():
     macd = latest['MACD']
     signal = latest['Signal']
 
+    print(f"[AI] RSI: {rsi:.2f} | EMA12: {ema12:.2f} | EMA26: {ema26:.2f} | MACD: {macd:.2f} vs Signal: {signal:.2f}")
+
     if rsi < 30 and ema12 > ema26 and macd > signal:
         return 'BUY'
     elif rsi > 70 and ema12 < ema26 and macd < signal:
@@ -99,7 +101,7 @@ def send_order(symbol, side, quantity):
 def log_trade(trade_type, price):
     timestamp = datetime.utcnow().isoformat()
     entry = f"{timestamp},{trade_type},{price}\n"
-    with open(TRADE_LOG_FILE,'a') as f:
+    with open(TRADE_LOG_FILE, 'a') as f:
         f.write(entry)
 
 def read_last_trade():
@@ -107,45 +109,49 @@ def read_last_trade():
         return None, None
     with open(TRADE_LOG_FILE, 'r') as f:
         lines = f.readlines()
-        if not lines:
-            return None, None
-        last = lines[-1].strip().split(',')
-        return last[1], float(last[2])
+    if not lines:
+        return None, None
+    last = lines[-1].strip().split(',')
+    return last[1], float(last[2])
 
 def calculate_profit(current_price):
     last_type, last_price = read_last_trade()
     if last_type == 'BUY':
         profit = (current_price - last_price) * TRADE_QUANTITY
-        fee = profit * PERFORMANCE_FEE_PERCENTAGE
-        return profit, fee
     elif last_type == 'SELL':
         profit = (last_price - current_price) * TRADE_QUANTITY
-        fee = profit * PERFORMANCE_FEE_PERCENTAGE
-        return profit, fee
-    return 0, 0
+    else:
+        return 0, 0
+    fee = profit * PERFORMANCE_FEE_PERCENTAGE
+    return profit, fee
 
 # ====== MAIN LOOP ======
 def run_bot():
     while True:
-        decision = ai_decision_engine()
-        print(f"AI Decision: {decision}")
+        try:
+            decision = ai_decision_engine()
+            current_price = get_klines(SYMBOL).iloc[-1]['close']
+            profit, fee = calculate_profit(current_price)
 
-        current_price = get_klines(SYMBOL).iloc[-1]['close']
-        profit, fee = calculate_profit(current_price)
-        print(f"Current Unrealized Profit: {profit:.4f} USDT | Your Fee: {fee:.4f} USDT")
+            print(f"AI Decision: {decision}")
+            print(f"Unrealized Profit: {profit:.4f} USDT | Fee (20%): {fee:.4f} USDT")
 
-        if decision == 'BUY':
-            result = send_order(SYMBOL, 'BUY', TRADE_QUANTITY)
-            print(f"Buy Order Result: {result}")
-            log_trade('BUY', current_price)
-        elif decision == 'SELL':
-            result = send_order(SYMBOL, 'SELL', TRADE_QUANTITY)
-            print(f"Sell Order Result: {result}")
-            log_trade('SELL', current_price)
-        else:
-            print("HOLD - No trade executed.")
+            if decision == 'BUY':
+                result = send_order(SYMBOL, 'BUY', TRADE_QUANTITY)
+                print(f"Buy Order Result: {result}")
+                log_trade('BUY', current_price)
+            elif decision == 'SELL':
+                result = send_order(SYMBOL, 'SELL', TRADE_QUANTITY)
+                print(f"Sell Order Result: {result}")
+                log_trade('SELL', current_price)
+            else:
+                print("HOLD - No trade executed.")
 
-        time.sleep(60) # Wait 1 minute before next trade
+        except Exception as e:
+            print(f"Error occurred: {e}")
 
+        time.sleep(60)  # Trade every 1 minute
+
+# ====== TRIGGER ENTRY POINT ======
 if __name__ == "__main__":
     run_bot()
