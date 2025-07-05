@@ -147,5 +147,5 @@ def run_bot():
 
         time.sleep(60) # Wait 1 minute before next trade
 
-# Uncomment this line to start the bot:
-# run_bot()
+if __name__ == "__main__":
+    run_bot()
