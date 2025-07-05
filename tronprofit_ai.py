@@ -145,7 +145,7 @@ def run_bot():
         else:
             print("HOLD - No trade executed.")
 
-        time.sleep(3600)  # Wait 1 hour before next trade
+        time.sleep(60) # Wait 1 minute before next trade
 
 # Uncomment this line to start the bot:
 # run_bot()
