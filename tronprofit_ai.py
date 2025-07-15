@@ -6,12 +6,12 @@ import pandas as pd
 import numpy as np
 import os
 from urllib.parse import urlencode
-from datetime import datetime
 from dotenv import load_dotenv
-from telegram_alerts import send_telegram_message
+from datetime import datetime
 
-# ====== LOAD ENV VARIABLES ======
 load_dotenv()
+
+# ====== ENV CONFIGURATION ======
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
 BASE_URL = 'https://testnet.binance.vision'
@@ -26,11 +26,9 @@ def get_klines(symbol='BTCUSDT', interval='1h', limit=100):
     params = {'symbol': symbol, 'interval': interval, 'limit': limit}
     response = requests.get(url, params=params)
     data = response.json()
-    df = pd.DataFrame(data, columns=[
-        'timestamp', 'open', 'high', 'low', 'close', 'volume',
-        'close_time', 'quote_asset_volume', 'num_trades',
-        'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'
-    ])
+    df = pd.DataFrame(data, columns=['timestamp', 'open', 'high', 'low', 'close', 'volume',
+                                     'close_time', 'quote_asset_volume', 'num_trades',
+                                     'taker_buy_base_asset_volume', 'taker_buy_quote_asset_volume', 'ignore'])
     df['close'] = pd.to_numeric(df['close'])
     return df[['timestamp', 'close']]
 
@@ -41,7 +39,8 @@ def calculate_rsi(prices, period=14):
     avg_gain = gain.rolling(window=period).mean()
     avg_loss = loss.rolling(window=period).mean()
     rs = avg_gain / avg_loss
-    return 100 - (100 / (1 + rs))
+    rsi = 100 - (100 / (1 + rs))
+    return rsi
 
 def calculate_ema(prices, span):
     return prices.ewm(span=span, adjust=False).mean()
@@ -116,41 +115,36 @@ def calculate_profit(current_price):
     last_type, last_price = read_last_trade()
     if last_type == 'BUY':
         profit = (current_price - last_price) * TRADE_QUANTITY
+        fee = profit * PERFORMANCE_FEE_PERCENTAGE
+        return profit, fee
     elif last_type == 'SELL':
         profit = (last_price - current_price) * TRADE_QUANTITY
-    else:
-        return 0, 0
-    fee = profit * PERFORMANCE_FEE_PERCENTAGE
-    return profit, fee
+        fee = profit * PERFORMANCE_FEE_PERCENTAGE
+        return profit, fee
+    return 0, 0
 
 # ====== MAIN LOOP ======
 def run_bot():
     while True:
         decision = ai_decision_engine()
+        print(f"AI Decision: {decision}")
+
         current_price = get_klines(SYMBOL).iloc[-1]['close']
         profit, fee = calculate_profit(current_price)
-
-        print(f"🤖 AI Decision: {decision}")
-        print(f"💰 Unrealized Profit: {profit:.4f} USDT | Fee: {fee:.4f} USDT")
-
-        # Send alert
-        send_telegram_message(
-            f"🤖 AI Decision: {decision}\n💸 Current Price: {current_price:.2f} USDT\n📈 Unrealized Profit: {profit:.4f} | Fee: {fee:.4f}"
-        )
+        print(f"Current Unrealized Profit: {profit:.4f} USDT | Your Fee: {fee:.4f} USDT")
 
         if decision == 'BUY':
             result = send_order(SYMBOL, 'BUY', TRADE_QUANTITY)
+            print(f"Buy Order Result: {result}")
             log_trade('BUY', current_price)
-            send_telegram_message(f"✅ BUY Order Placed\nDetails: {result}")
         elif decision == 'SELL':
             result = send_order(SYMBOL, 'SELL', TRADE_QUANTITY)
+            print(f"Sell Order Result: {result}")
             log_trade('SELL', current_price)
-            send_telegram_message(f"✅ SELL Order Placed\nDetails: {result}")
         else:
-            send_telegram_message("🕒 HOLD - No trade executed.")
+            print("HOLD - No trade executed.")
 
-        time.sleep(3600)  # 1 hour interval
+        time.sleep(3600)  # Wait 1 hour before next trade
 
-# ====== START BOT ======
 if __name__ == "__main__":
     run_bot()
