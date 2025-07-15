@@ -9,16 +9,27 @@ from urllib.parse import urlencode
 from dotenv import load_dotenv
 from datetime import datetime
 
+# ====== LOAD ENV VARIABLES ======
 load_dotenv()
-
-# ====== ENV CONFIGURATION ======
 API_KEY = os.getenv("BINANCE_API_KEY")
 API_SECRET = os.getenv("BINANCE_API_SECRET")
+TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN")
+TELEGRAM_CHAT_ID = os.getenv("TELEGRAM_CHAT_ID")
+TRADE_SYMBOLS = os.getenv("TRADE_SYMBOLS", "BTCUSDT").split('|')
+TRADE_QUANTITY = float(os.getenv("TRADE_QUANTITY", 0.001))
+TRADE_LOG_FILE = os.getenv("TRADE_LOG_FILE", "trade_log.csv")
+PERFORMANCE_FEE = float(os.getenv("PERFORMANCE_FEE", 0.20))
 BASE_URL = 'https://testnet.binance.vision'
-SYMBOL = 'BTCUSDT'
-TRADE_QUANTITY = 0.001
-TRADE_LOG_FILE = 'trade_log.csv'
-PERFORMANCE_FEE_PERCENTAGE = 0.20
+
+# ====== TELEGRAM NOTIFIER ======
+def send_telegram_message(message):
+    if TELEGRAM_BOT_TOKEN and TELEGRAM_CHAT_ID:
+        url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+        data = {"chat_id": TELEGRAM_CHAT_ID, "text": message}
+        try:
+            requests.post(url, data=data)
+        except Exception as e:
+            print(f"Telegram Error: {e}")
 
 # ====== AI DECISION ENGINE ======
 def get_klines(symbol='BTCUSDT', interval='1h', limit=100):
@@ -52,8 +63,8 @@ def calculate_macd(prices):
     signal_line = macd_line.ewm(span=9, adjust=False).mean()
     return macd_line, signal_line
 
-def ai_decision_engine():
-    df = get_klines(SYMBOL)
+def ai_decision_engine(symbol):
+    df = get_klines(symbol)
     df['RSI'] = calculate_rsi(df['close'])
     df['EMA12'] = calculate_ema(df['close'], 12)
     df['EMA26'] = calculate_ema(df['close'], 26)
@@ -95,56 +106,59 @@ def send_order(symbol, side, quantity):
     return response.json()
 
 # ====== PROFIT TRACKING ======
-def log_trade(trade_type, price):
+def log_trade(symbol, trade_type, price):
     timestamp = datetime.utcnow().isoformat()
-    entry = f"{timestamp},{trade_type},{price}\n"
+    entry = f"{timestamp},{symbol},{trade_type},{price}\n"
     with open(TRADE_LOG_FILE, 'a') as f:
         f.write(entry)
 
-def read_last_trade():
+def read_last_trade(symbol):
     if not os.path.exists(TRADE_LOG_FILE):
         return None, None
     with open(TRADE_LOG_FILE, 'r') as f:
-        lines = f.readlines()
-        if not lines:
-            return None, None
-        last = lines[-1].strip().split(',')
-        return last[1], float(last[2])
+        lines = [line for line in f.readlines() if symbol in line]
+    if not lines:
+        return None, None
+    last = lines[-1].strip().split(',')
+    return last[2], float(last[3])
 
-def calculate_profit(current_price):
-    last_type, last_price = read_last_trade()
+def calculate_profit(symbol, current_price):
+    last_type, last_price = read_last_trade(symbol)
     if last_type == 'BUY':
         profit = (current_price - last_price) * TRADE_QUANTITY
-        fee = profit * PERFORMANCE_FEE_PERCENTAGE
+        fee = profit * PERFORMANCE_FEE
         return profit, fee
     elif last_type == 'SELL':
         profit = (last_price - current_price) * TRADE_QUANTITY
-        fee = profit * PERFORMANCE_FEE_PERCENTAGE
+        fee = profit * PERFORMANCE_FEE
         return profit, fee
     return 0, 0
 
 # ====== MAIN LOOP ======
 def run_bot():
     while True:
-        decision = ai_decision_engine()
-        print(f"AI Decision: {decision}")
+        for symbol in TRADE_SYMBOLS:
+            decision = ai_decision_engine(symbol)
+            current_price = get_klines(symbol).iloc[-1]['close']
+            profit, fee = calculate_profit(symbol, current_price)
 
-        current_price = get_klines(SYMBOL).iloc[-1]['close']
-        profit, fee = calculate_profit(current_price)
-        print(f"Current Unrealized Profit: {profit:.4f} USDT | Your Fee: {fee:.4f} USDT")
+            message = f"[{symbol}] AI Decision: {decision}\nUnrealized Profit: {profit:.4f} USDT | Fee: {fee:.4f} USDT"
+            print(message)
+            send_telegram_message(message)
 
-        if decision == 'BUY':
-            result = send_order(SYMBOL, 'BUY', TRADE_QUANTITY)
-            print(f"Buy Order Result: {result}")
-            log_trade('BUY', current_price)
-        elif decision == 'SELL':
-            result = send_order(SYMBOL, 'SELL', TRADE_QUANTITY)
-            print(f"Sell Order Result: {result}")
-            log_trade('SELL', current_price)
-        else:
-            print("HOLD - No trade executed.")
-
-        time.sleep(3600)  # Wait 1 hour before next trade
+            if decision == 'BUY':
+                result = send_order(symbol, 'BUY', TRADE_QUANTITY)
+                log_trade(symbol, 'BUY', current_price)
+                print(f"Buy Order: {result}")
+                send_telegram_message(f"BUY ORDER for {symbol}: {result}")
+            elif decision == 'SELL':
+                result = send_order(symbol, 'SELL', TRADE_QUANTITY)
+                log_trade(symbol, 'SELL', current_price)
+                print(f"Sell Order: {result}")
+                send_telegram_message(f"SELL ORDER for {symbol}: {result}")
+            else:
+                print(f"HOLD - No trade for {symbol}.")
+        time.sleep(3600)
 
 if __name__ == "__main__":
     run_bot()
